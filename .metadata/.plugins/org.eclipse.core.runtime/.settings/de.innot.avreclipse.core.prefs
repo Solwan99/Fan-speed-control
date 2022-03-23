@@ -1,6 +1,0 @@
-avrpaths//systempath/AVRDUDE=E\:\\EmbeddedSystemsDiploma\\bin
-avrpaths//systempath/AVRGCC=E\:\\EmbeddedSystemsDiploma\\bin
-avrpaths//systempath/AVRINCLUDE=E\:\\EmbeddedSystemsDiploma\\avr\\include
-avrpaths//systempath/MAKE=E\:\\EmbeddedSystemsDiploma\\utils\\bin
-avrpaths//systempath/PDFPATH=
-eclipse.preferences.version=1
