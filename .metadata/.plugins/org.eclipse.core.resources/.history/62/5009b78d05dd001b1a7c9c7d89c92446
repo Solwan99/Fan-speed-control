@@ -1,0 +1,177 @@
+/*
+ * timers_atmega328.c
+ *
+ * Created: 4/12/2021 10:40:51 PM
+ *  Author: mustafafaisal
+ */ 
+
+#include <avr/interrupt.h>
+
+#include "timers.h"
+#include "../config.h" // Include configuration file.
+
+#define MCU_TIMERS_COUNT 3    // Number of available timers in atmega328pb.
+#define TIMER_PRESCALER_LIMIT 7
+#define TIMER_CLK_SRC_LIMIT 5 // Timer's prescaler register value {1, 8, 64, 256, 1024}.
+
+// Calculate the value for the compare registers or to preload tcnt...
+#define __calctop(F_CPU, TOP_TIMER_VAL) ((((F_CPU/1000000UL) * TOP_TIMER_VAL) + (1/2)))-1;
+#define __calctimer_tick_us(PRESCALER) ((1000UL*PRESCALER)/((F_CPU/ONE_MEGA_HERTZ)))
+
+void empty_timer_callback(void);
+
+typedef struct timer_properties_s {
+	uint8_t selected_prescaler_src;
+	uint16_t range;
+	uint16_t preload_value;
+	uint16_t prescaler[TIMER_PRESCALER_LIMIT];
+	uint16_t prescaler_divide_sequence[TIMER_PRESCALER_LIMIT];
+	uint32_t overflow_count_threshold;
+	fnptr overflowisr;
+} timer_properties_t;
+
+
+
+timer_properties_t timer_property[MCU_TIMERS_COUNT] = {
+	// General comment, since c has no way to know the array size. 
+	// Therefore, we will place a terminal value.
+	// Timer 0 properties.
+	{ 0, 255,   0, {1,8,64,256,1024,0,0},    {0,3,3,2,2,0,0}, 0, empty_timer_callback },
+	// Timer 1 properties.
+	{ 0, 65535, 0, {1,8,64,256,1024,0,0},    {0,3,3,2,2,0,0}, 0, empty_timer_callback },
+	// Timer 2 properties.
+	{ 0, 255,   0, {1,8,32,64,128,256,1024}, {0,3,2,1,1,1,2}, 0, empty_timer_callback }
+};
+
+
+// ISR for Timers Overflow Interrupt
+ISR(TIMER0_OVF_vect) {
+	static uint32_t overflow_count = 0;
+	overflow_count += 1;
+	if (overflow_count >= timer_property[0].overflow_count_threshold) {
+		// Time elapsed --> execute the traget function.
+		overflow_count = 0;
+		TCNT0  = timer_property[0].preload_value;
+		timer_property[0].overflowisr();
+	}
+}
+
+ISR(TIMER1_OVF_vect) {
+	static uint32_t overflow_count = 0;
+	overflow_count += 1;
+	if (overflow_count >= timer_property[1].overflow_count_threshold) {
+		// Time elapsed --> execute the traget function.
+		overflow_count = 0;
+		TCNT1  = timer_property[1].preload_value;
+		timer_property[1].overflowisr();
+	}
+}
+
+ISR(TIMER2_OVF_vect) {
+	static uint32_t overflow_count = 0;
+	overflow_count += 1;
+	if (overflow_count >= timer_property[2].overflow_count_threshold) {
+		// Time elapsed --> execute the traget function.
+		overflow_count = 0;
+		TCNT2  = timer_property[2].preload_value;
+		timer_property[2].overflowisr();
+	}
+}
+
+
+void empty_timer_callback(void) {}
+
+
+void attachTimerInterrupt(const uint8_t timer_id, const uint32_t wanted_microseconds, const fnptr timeroverflowisr) {
+	// If specified timer_number is invalid or passing a null function.
+	// -> immediately leave the function...
+	volatile uint8_t prescaler_clock_src;
+	uint32_t timer_ticks = 0;
+//	if ( (timer_id >= MCU_TIMERS_COUNT) || (timeroverflowisr != (void *)0) ) { return; }
+	
+	// First we need to find the best prescaler value to use.
+	// We can do this by keep dividing the wanted_microseconds ticks counts value until it fits into the timer's size.
+	// If we failed to find a value to fit then we will use the max prescaler value then count the number of overflows
+	// to reach the required elapsed time.
+	timer_ticks = ((F_CPU/1000000) * wanted_microseconds)-1;
+	for (prescaler_clock_src = 0; prescaler_clock_src < TIMER_PRESCALER_LIMIT; prescaler_clock_src++) {
+		// To divide the wanted_microseconds ticks count we can use the divide operator or better use shift right.
+		// that's why we have dividing sequence for each timer.
+		timer_ticks >>= timer_property[timer_id].prescaler_divide_sequence[prescaler_clock_src];
+		if (timer_ticks <= timer_property[timer_id].range) {
+			// We have a proper prescaler.
+			timer_property[timer_id].selected_prescaler_src = prescaler_clock_src;
+			// Calculate the timer's preload value.
+			timer_property[timer_id].preload_value = timer_property[timer_id].range - timer_ticks;
+			break;
+		} else if (timer_property[timer_id].prescaler[prescaler_clock_src] == 1024) {
+			// This means we failed to find a proper presacler.
+			// then set the maximum value for timer and calculate the required number of overflows to reach
+			// wanted_microseconds.
+			timer_property[timer_id].selected_prescaler_src = prescaler_clock_src;
+			timer_property[timer_id].preload_value = 0;
+			timer_property[timer_id].overflow_count_threshold = wanted_microseconds/__calctimer_tick_us(1024);
+			break;
+		} else {
+			// Keep searching.
+		}
+	}
+	
+	// After finding the proper timer's configuration, its time to set its registers.
+	// For now we will use a manual approach for setting the timer's registers.
+	// Set register corresponding to specified timer
+	switch(timer_id)
+	{
+		case 0: {
+			// Reset TCCR1A
+			TCCR0A = 0x00;
+			// Reset TCCR1B
+			TCCR0B = 0x00;
+			// Set counter to preload value
+			TCNT0  = timer_property[timer_id].preload_value & 0x00FF;
+			// Enable "Output Compare Interrupt A"
+			TIMSK0 = (1 << TOIE0);
+			// Set clock and start timer
+			TCCR0B |= timer_property[timer_id].selected_prescaler_src;
+			// Exit
+			break;
+		}
+		case 1: {
+			// Reset TCCR1A
+			TCCR1A = 0x00;
+			// Reset TCCR1B
+			TCCR1B = 0x00;
+			// Set counter to preload value
+			TCNT1  = timer_property[timer_id].preload_value & 0xFFFF;
+			// Enable "Output Compare Interrupt A"
+			TIMSK1 = (1 << TOIE1);
+			// Set clock and start timer
+			TCCR1B |= timer_property[timer_id].selected_prescaler_src;
+			// Exit
+			break;
+		}
+		case 2: {
+			// Reset TCCRnA
+			TCCR2A = 0x00;
+			// Reset TCCR1B
+			TCCR2B = 0x00;
+			// Set counter to preload value
+			TCNT2  = timer_property[timer_id].preload_value & 0x00ff;
+			// Enable "Output Compare Interrupt A"
+			TIMSK2 = (1 << TOIE2);
+			// Set clock and start timer
+			TCCR2B |= timer_property[timer_id].selected_prescaler_src;
+			// Exit
+			break;
+		}
+	}
+	
+	timer_property[timer_id].overflowisr = timeroverflowisr;
+}
+
+void detachTimerInterrupt(uint8_t timer_number) {
+	
+}
+
+
+

@@ -1,0 +1,6 @@
+eclipse.preferences.version=1
+environment/project/de.innot.avreclipse.configuration.app.debug.1373055194/AVRTARGETMCU/delimiter=;
+environment/project/de.innot.avreclipse.configuration.app.debug.1373055194/AVRTARGETMCU/operation=replace
+environment/project/de.innot.avreclipse.configuration.app.debug.1373055194/AVRTARGETMCU/value=atmega328p
+environment/project/de.innot.avreclipse.configuration.app.debug.1373055194/append=true
+environment/project/de.innot.avreclipse.configuration.app.debug.1373055194/appendContributed=true
